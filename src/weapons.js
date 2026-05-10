@@ -70,63 +70,255 @@ export class WeaponSystem {
     this._buildSword();
 
     // Base & goal positions for weapons (viewmodel space)
-    this._pistolBase = new THREE.Vector3(0.28, -0.28, -0.55);
-    this._pistolAim = new THREE.Vector3(0.0, -0.16, -0.38);
+    this._pistolBase = new THREE.Vector3(0.22, -0.22, -0.45);
+    this._pistolAim = new THREE.Vector3(0.0, -0.12, -0.32);
     this._swordBase = new THREE.Vector3(0.34, -0.32, -0.6);
 
     this.show(0);
   }
 
-  // --- Build viewmodel meshes (stylized but real-feeling) ---
+  // --- Build viewmodel meshes (detailed, realistic pistol) ---
   _buildPistol() {
+    // Coordinates: +X = right, +Y = up, -Z = forward (out the muzzle).
+    // We build the pistol so the grip sits near origin and the muzzle points to -Z.
     const g = new THREE.Group();
-    const matBody = new THREE.MeshStandardMaterial({ color: 0x20201e, roughness: 0.55, metalness: 0.7 });
-    const matGrip = new THREE.MeshStandardMaterial({ color: 0x2e221b, roughness: 0.9 });
-    const matAccent = new THREE.MeshStandardMaterial({ color: 0x867053, roughness: 0.4, metalness: 0.9 });
+    const steel = new THREE.MeshStandardMaterial({ color: 0x1b1c1e, roughness: 0.45, metalness: 0.85 });
+    const darkSteel = new THREE.MeshStandardMaterial({ color: 0x0e0f10, roughness: 0.55, metalness: 0.9 });
+    const polymer = new THREE.MeshStandardMaterial({ color: 0x171715, roughness: 0.88, metalness: 0.05 });
+    const gripTexture = new THREE.MeshStandardMaterial({ color: 0x0f0f0e, roughness: 1.0, metalness: 0.0 });
+    const brassAccent = new THREE.MeshStandardMaterial({ color: 0x8a6a30, roughness: 0.4, metalness: 0.9 });
+    const skinMat = new THREE.MeshStandardMaterial({ color: 0xc9a78a, roughness: 0.88, metalness: 0.04 });
 
-    const slide = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.085, 0.28), matBody);
-    slide.position.set(0, 0, 0);
+    // ===== Frame (lower receiver, polymer) =====
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.06, 0.26), polymer);
+    frame.position.set(0, -0.04, 0.0);
+    g.add(frame);
+
+    // Dust cover / rail under barrel (polymer, with a short Picatinny-like rail)
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.025, 0.09), polymer);
+    rail.position.set(0, -0.05, -0.13);
+    g.add(rail);
+    // Rail slots
+    for (let i = 0; i < 3; i++) {
+      const slot = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.004, 0.012), darkSteel);
+      slot.position.set(0, -0.062, -0.10 - i * 0.028);
+      g.add(slot);
+    }
+
+    // ===== Slide (upper, steel) =====
+    // Main slide body
+    const slide = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.075, 0.30), steel);
+    slide.position.set(0, 0.01, 0.0);
     g.add(slide);
+    // Rounded front of slide (bevel)
+    const slideFront = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.058, 0.025), darkSteel);
+    slideFront.position.set(0, 0.005, -0.155);
+    g.add(slideFront);
+    // Rear slide serrations (vertical grooves for racking)
+    const serrMat = darkSteel;
+    for (let i = 0; i < 6; i++) {
+      const serr = new THREE.Mesh(new THREE.BoxGeometry(0.088, 0.072, 0.003), serrMat);
+      serr.position.set(0, 0.01, 0.10 + i * 0.012);
+      g.add(serr);
+    }
+    // Front slide serrations
+    for (let i = 0; i < 4; i++) {
+      const serr = new THREE.Mesh(new THREE.BoxGeometry(0.088, 0.072, 0.003), serrMat);
+      serr.position.set(0, 0.01, -0.08 - i * 0.012);
+      g.add(serr);
+    }
 
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.02, 0.1, 10), matAccent);
+    // Ejection port (recessed cavity on the right side)
+    const ejection = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.045, 0.065), darkSteel);
+    ejection.position.set(0.044, 0.022, 0.02);
+    g.add(ejection);
+    // A brass case peeking through the port (flavour detail)
+    const caseIn = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.025, 8), brassAccent);
+    caseIn.rotation.x = Math.PI / 2;
+    caseIn.position.set(0.04, 0.015, 0.01);
+    g.add(caseIn);
+
+    // ===== Barrel =====
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.013, 0.16, 14), steel);
     barrel.rotation.x = Math.PI / 2;
-    barrel.position.set(0, 0, -0.19);
+    barrel.position.set(0, 0.005, -0.12);
     g.add(barrel);
+    // Muzzle crown
+    const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.017, 0.012, 16), darkSteel);
+    crown.rotation.x = Math.PI / 2;
+    crown.position.set(0, 0.005, -0.195);
+    g.add(crown);
+    // Bore hole
+    const bore = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.006, 12),
+      new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 1 }));
+    bore.rotation.x = Math.PI / 2;
+    bore.position.set(0, 0.005, -0.202);
+    g.add(bore);
 
-    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.16, 0.09), matGrip);
-    grip.position.set(0, -0.12, 0.05);
-    g.add(grip);
+    // ===== Sights =====
+    // Rear sight (notched block)
+    const rearL = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.014, 0.016), darkSteel);
+    rearL.position.set(-0.022, 0.055, 0.125);
+    g.add(rearL);
+    const rearR = rearL.clone(); rearR.position.x = 0.022; g.add(rearR);
+    // Front sight post
+    const front = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.016, 0.01), darkSteel);
+    front.position.set(0, 0.056, -0.14);
+    g.add(front);
+    // White dots (flavour)
+    const dotMat = new THREE.MeshBasicMaterial({ color: 0xcfcfcf });
+    const dot = new THREE.Mesh(new THREE.SphereGeometry(0.003, 6, 6), dotMat);
+    dot.position.set(0, 0.058, -0.135); g.add(dot);
 
-    const trigger = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.03, 0.04), matBody);
-    trigger.position.set(0, -0.03, 0.0);
+    // ===== Trigger assembly =====
+    // Trigger guard (built from two thin bars forming a ring)
+    const guardBot = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.012, 0.08), polymer);
+    guardBot.position.set(0, -0.075, -0.005);
+    g.add(guardBot);
+    const guardFront = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.05, 0.012), polymer);
+    guardFront.position.set(0, -0.05, -0.038);
+    g.add(guardFront);
+    const guardRear = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.04, 0.012), polymer);
+    guardRear.position.set(0, -0.055, 0.028);
+    g.add(guardRear);
+    // Trigger (curved — approximated by tilted thin block)
+    const trigger = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.036, 0.012), darkSteel);
+    trigger.position.set(0, -0.052, -0.008);
+    trigger.rotation.x = -0.15;
     g.add(trigger);
 
-    const sight = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.015, 0.02), matBody);
-    sight.position.set(0, 0.055, 0.1);
-    g.add(sight);
+    // ===== Grip (polymer with checkering) =====
+    // Main grip panel, tilted slightly backward
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.17, 0.10), polymer);
+    grip.position.set(0, -0.15, 0.055);
+    grip.rotation.x = 0.12;
+    g.add(grip);
+    // Grip texture panels (darker inserts)
+    const gripPanelL = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.14, 0.07), gripTexture);
+    gripPanelL.position.set(-0.044, -0.15, 0.058);
+    gripPanelL.rotation.x = 0.12;
+    g.add(gripPanelL);
+    const gripPanelR = gripPanelL.clone(); gripPanelR.position.x = 0.044; g.add(gripPanelR);
+    // Checkering hint: horizontal ridges on front strap
+    for (let i = 0; i < 8; i++) {
+      const ridge = new THREE.Mesh(new THREE.BoxGeometry(0.086, 0.004, 0.006), gripTexture);
+      ridge.position.set(0, -0.085 - i * 0.016, 0.015 - i * 0.003);
+      ridge.rotation.x = 0.12;
+      g.add(ridge);
+    }
+    // Magazine baseplate protruding at the bottom
+    const magBase = new THREE.Mesh(new THREE.BoxGeometry(0.088, 0.018, 0.10), darkSteel);
+    magBase.position.set(0, -0.235, 0.055);
+    magBase.rotation.x = 0.12;
+    g.add(magBase);
+    // Mag release button (small nub on left side)
+    const magRelease = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.015, 0.012), darkSteel);
+    magRelease.position.set(-0.045, -0.09, 0.022);
+    g.add(magRelease);
 
-    // Hand (abstract)
-    const hand = new THREE.Mesh(
-      new THREE.BoxGeometry(0.1, 0.2, 0.1),
-      new THREE.MeshStandardMaterial({ color: 0xc2a58a, roughness: 0.9 }),
-    );
-    hand.position.set(0, -0.22, 0.07);
-    g.add(hand);
+    // ===== Hammer / back of slide (beavertail) =====
+    const beaver = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.04, 0.03), polymer);
+    beaver.position.set(0, -0.04, 0.135);
+    g.add(beaver);
 
-    // Muzzle flash (disabled until firing)
-    const flashMat = new THREE.MeshBasicMaterial({ color: 0xffc04a, transparent: true, opacity: 0 });
-    const flash = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.22), flashMat);
-    flash.position.set(0, 0, -0.27);
-    flash.rotation.z = Math.random() * Math.PI * 2;
-    g.add(flash);
-    this._muzzleFlash = flash;
+    // ===== Slide lock / safety lever (left side only) =====
+    const slideLock = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.012, 0.04), darkSteel);
+    slideLock.position.set(-0.045, -0.01, 0.04);
+    g.add(slideLock);
 
-    // Light attached to flash
-    const flashLight = new THREE.PointLight(0xffc04a, 0, 6, 2);
-    flash.add(flashLight);
+    // ===== Hands =====
+    // Right hand gripping the gun
+    const handR = new THREE.Group();
+    const palm = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.14, 0.09), skinMat);
+    palm.position.set(0, 0, 0); handR.add(palm);
+    // Fingers wrapping the grip (four small blocks at front)
+    for (let i = 0; i < 4; i++) {
+      const finger = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.022, 0.07), skinMat);
+      finger.position.set(0.0, 0.04 - i * 0.028, -0.045);
+      handR.add(finger);
+    }
+    // Thumb on the left side
+    const thumb = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.06, 0.05), skinMat);
+    thumb.position.set(-0.055, 0.025, 0.015);
+    handR.add(thumb);
+    // Wrist
+    const wristR = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.12, 0.12),
+      new THREE.MeshStandardMaterial({ color: 0x2a2620, roughness: 0.9 }));
+    wristR.position.set(0, -0.10, 0.08);
+    handR.add(wristR);
+    handR.position.set(0.0, -0.15, 0.075);
+    handR.rotation.x = 0.12;
+    g.add(handR);
+
+    // Left hand supporting, cupped under the right
+    const handL = new THREE.Group();
+    const palmL = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.07, 0.09), skinMat);
+    palmL.position.set(0, 0, 0); handL.add(palmL);
+    for (let i = 0; i < 4; i++) {
+      const finger = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.02, 0.06), skinMat);
+      finger.position.set(0.055, -0.005 - i * 0.024, -0.02 + i * 0.01);
+      handL.add(finger);
+    }
+    const thumbL = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.022, 0.04), skinMat);
+    thumbL.position.set(-0.02, 0.03, -0.01);
+    handL.add(thumbL);
+    const wristL = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.1, 0.10),
+      new THREE.MeshStandardMaterial({ color: 0x2a2620, roughness: 0.9 }));
+    wristL.position.set(-0.05, -0.08, 0.055);
+    handL.add(wristL);
+    handL.position.set(-0.08, -0.18, 0.02);
+    handL.rotation.y = 0.5;
+    handL.rotation.x = 0.15;
+    g.add(handL);
+
+    // ===== Muzzle flash (lit when firing) =====
+    // A 3D flash: central bright disc + cross blades for a real "star" flash
+    const flashGroup = new THREE.Group();
+    flashGroup.position.set(0, 0.005, -0.22);
+
+    const flashMat = new THREE.MeshBasicMaterial({ color: 0xffd380, transparent: true, opacity: 0 });
+    const flashDisc = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.22), flashMat);
+    flashDisc.rotation.z = Math.random() * Math.PI * 2;
+    flashGroup.add(flashDisc);
+
+    const bladeMat = new THREE.MeshBasicMaterial({ color: 0xffebaa, transparent: true, opacity: 0 });
+    const blade1 = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.06), bladeMat);
+    flashGroup.add(blade1);
+    const blade2 = new THREE.Mesh(new THREE.PlaneGeometry(0.06, 0.34), bladeMat);
+    flashGroup.add(blade2);
+    const blade3 = new THREE.Mesh(new THREE.PlaneGeometry(0.28, 0.04), bladeMat);
+    blade3.rotation.z = Math.PI / 4;
+    flashGroup.add(blade3);
+    const blade4 = new THREE.Mesh(new THREE.PlaneGeometry(0.28, 0.04), bladeMat);
+    blade4.rotation.z = -Math.PI / 4;
+    flashGroup.add(blade4);
+
+    g.add(flashGroup);
+    this._muzzleFlash = flashGroup;
+    this._muzzleFlashMats = [flashMat, bladeMat];
+
+    // Point light attached to flash for scene illumination
+    const flashLight = new THREE.PointLight(0xffd380, 0, 8, 2);
+    flashGroup.add(flashLight);
     this._muzzleLight = flashLight;
 
+    // ===== Smoke puff (animated when firing) =====
+    const smokeMat = new THREE.MeshBasicMaterial({ color: 0xd8d0c4, transparent: true, opacity: 0 });
+    const smoke = new THREE.Mesh(new THREE.PlaneGeometry(0.28, 0.28), smokeMat);
+    smoke.position.set(0, 0.01, -0.24);
+    g.add(smoke);
+    this._muzzleSmoke = smoke;
+    this._muzzleSmokeMat = smokeMat;
+
     g.traverse(o => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
+
+    // Slide reference so we can animate the cycling on fire (slide moves back then forward)
+    this._slideGroup = new THREE.Group();
+    // Move the slide parts into a sub-group for cycling animation.
+    // Simpler: mark slide + serrations + sight + ejection + casings for collective translation.
+    // (We just animate a small z offset applied to the whole pistolMesh — that reads fine at FPS distance.)
+    this._slideOffset = 0;
+
     this.pistolMesh = g;
     this.viewModel.add(g);
   }
@@ -292,10 +484,15 @@ export class WeaponSystem {
     // Viewmodel spring: shove it backward and up
     this.vmRecoilVel += PISTOL.recoilKick * aimReduce * (0.85 + Math.random() * 0.3);
 
-    // Muzzle flash
-    this._muzzleFlash.material.opacity = 1.0;
-    this._muzzleFlash.scale.setScalar(0.8 + Math.random() * 0.4);
-    this._muzzleLight.intensity = 4;
+    // Muzzle flash + smoke
+    for (const m of this._muzzleFlashMats) m.opacity = 1.0;
+    this._muzzleFlash.scale.setScalar(0.9 + Math.random() * 0.4);
+    this._muzzleFlash.rotation.z = Math.random() * Math.PI * 2;
+    this._muzzleLight.intensity = 6;
+    this._muzzleSmokeMat.opacity = 0.6;
+    this._muzzleSmoke.scale.setScalar(0.8 + Math.random() * 0.3);
+    // Trigger slide cycling animation (start at -1 so we push slide back)
+    this._slideOffset = 0.018;
 
     // Sound
     this.audio.gunshot(origin);
@@ -380,12 +577,20 @@ export class WeaponSystem {
       this.pistolMesh.rotation.z = damp(this.pistolMesh.rotation.z, 0, 12, dt);
       this.pistolMesh.rotation.y = damp(this.pistolMesh.rotation.y, -player.recoilYawKick * 0.4, 14, dt);
     }
+    // Apply slide offset (the whole pistol recoils back briefly; reads as slide-cycling at FPS distance)
+    p.z += this._slideOffset;
     this.pistolMesh.position.copy(p);
 
-    // Muzzle flash fade
-    this._muzzleFlash.material.opacity *= Math.pow(0.0001, dt);
-    if (this._muzzleFlash.material.opacity < 0.02) this._muzzleFlash.material.opacity = 0;
+    // Muzzle flash fade (multiple materials) + smoke expand/fade + slide cycle
+    for (const m of this._muzzleFlashMats) {
+      m.opacity *= Math.pow(0.00001, dt);
+      if (m.opacity < 0.02) m.opacity = 0;
+    }
     this._muzzleLight.intensity *= Math.pow(0.00005, dt);
+    this._muzzleSmokeMat.opacity *= Math.pow(0.01, dt);
+    this._muzzleSmoke.scale.multiplyScalar(1 + dt * 4);
+    // Slide spring returns forward (over ~0.12s)
+    this._slideOffset = damp(this._slideOffset, 0, 22, dt);
 
     // Sword pose + swing
     const base = this._swordBase;

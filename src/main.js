@@ -14,6 +14,7 @@ import { Particles } from './particles.js';
 import { Skeleton } from './skeleton.js';
 import { ArrowSystem, ThrowSystem } from './projectiles.js';
 import { AudioEngine } from './audio.js';
+import { loadOptionalAssets } from './assetLoader.js';
 
 // --- DOM refs ---
 const el = (id) => document.getElementById(id);
@@ -225,7 +226,16 @@ const arrowSystem = new ArrowSystem(scene, null); // game ref set below
 const enemies = [];
 loadingText.textContent = 'Raising the dead...';
 loadingBar.style.width = '55%';
-for (const sp of lvl.spawnPoints.slice(0, 10)) {
+// 20 hyper-aggressive skeleton archers. Use every spawn point; if more skeletons
+// than points, loop around with small offsets so they don't stack.
+const SKELETON_COUNT = 20;
+const pts = lvl.spawnPoints;
+for (let i = 0; i < SKELETON_COUNT; i++) {
+  const base = pts[i % pts.length];
+  const dup = i >= pts.length;
+  const sp = dup
+    ? { x: base.x + (Math.random() - 0.5) * 4, y: 0, z: base.z + (Math.random() - 0.5) * 4 }
+    : base;
   enemies.push(new Skeleton(scene, sp));
 }
 
@@ -657,19 +667,34 @@ function loop() {
 
 function lerpNum(a, b, t) { return a + (b - a) * t; }
 
-// --- Boot sequence ---
-function finishLoading() {
+// Initial HUD state — set the objective threat count to the current enemy count
+enemiesLeftEl.textContent = enemies.length;
+function finishLoading(msg = 'Ready.') {
   loadingBar.style.width = '100%';
-  loadingText.textContent = 'Ready.';
+  loadingText.textContent = msg;
   setTimeout(() => {
     loadingEl.classList.add('hidden');
     startEl.classList.remove('hidden');
   }, 300);
 }
-// Simulate progressive load for the user (everything is synchronous)
-loadingBar.style.width = '80%';
-setTimeout(() => { loadingBar.style.width = '95%'; loadingText.textContent = 'Priming audio...'; }, 150);
-setTimeout(finishLoading, 450);
+
+// Simulate progressive load for the user + attempt optional glTF assets in
+// parallel. The assetLoader resolves gracefully if nothing is found, so this
+// never blocks the game from starting.
+loadingBar.style.width = '70%';
+loadingText.textContent = 'Searching for glTF assets (optional)...';
+loadOptionalAssets((frac, key, ok) => {
+  loadingBar.style.width = `${70 + Math.floor(frac * 25)}%`;
+  loadingText.textContent = ok ? `Loaded ${key}.glb` : `(skipped ${key}.glb)`;
+}).then((res) => {
+  // We report the summary but keep procedural fallback fully functional.
+  game.gltfAssets = res.loaded;
+  loadingBar.style.width = '97%';
+  loadingText.textContent = res.summary;
+  setTimeout(() => finishLoading(), 150);
+}).catch(() => {
+  finishLoading('Ready (procedural fallback).');
+});
 
 // Start button -> audio init + pointer lock
 el('btn-start').addEventListener('click', () => {

@@ -1,12 +1,17 @@
-// Procedural "Old Amber Factory" level.
-// 5 zones in a single connected map, built from boxes + props with collision.
+// Procedural "Old Amber Factory" level — upgraded build.
+// Walls/floors remain AABB for collision + shadowing, but all props use
+// detailed meshes from ./props.js so the scene reads as high-fidelity.
 import * as THREE from 'three';
-import { rand, randInt, choose, makeRng } from './utils.js';
+import { rand, randInt, choose } from './utils.js';
 import {
   matConcrete, matMetal, matBrick, matFloor, matDirt,
 } from './materials.js';
+import {
+  buildBarrel, buildCrate, buildContainer, buildRock,
+  buildTree, buildBroadleaf, buildRustyCar, buildYellowTruck,
+  buildPipeSegment, buildConcreteBarrier,
+} from './props.js';
 
-// Collision box container
 export class BoxSet {
   constructor() { this.boxes = []; }
   add(min, max, data = {}) {
@@ -14,7 +19,6 @@ export class BoxSet {
   }
 }
 
-// Build a box mesh at given range with a material; also adds a collision box.
 function blockBox(group, boxes, min, max, mat, { collide = true, cast = true, recv = true } = {}) {
   const sx = max[0] - min[0], sy = max[1] - min[1], sz = max[2] - min[2];
   const g = new THREE.BoxGeometry(sx, sy, sz);
@@ -26,19 +30,23 @@ function blockBox(group, boxes, min, max, mat, { collide = true, cast = true, re
   return m;
 }
 
+// Register a detailed prop (group + optional colliders) with the level.
+function addProp(root, colliders, prop) {
+  root.add(prop.group);
+  if (prop.colliderBoxes) {
+    for (const cb of prop.colliderBoxes) colliders.add(cb.min, cb.max);
+  }
+  return prop.group;
+}
+
 export function buildLevel(scene) {
   const root = new THREE.Group();
   scene.add(root);
   const colliders = new BoxSet();
-  // Semantic zones with bounding regions (used for audio reverb hints / spawn areas).
   const zones = {};
-  // Patrol points per zone
   const patrolPoints = [];
-  // Interactables that we can reference (truck, key, power)
   const interactables = [];
-  // Throwables are spawned here with a position; ThrowSystem will build meshes.
   const throwables = [];
-  // Free "spawn" floor positions for skeletons
   const spawnPoints = [];
 
   const mFloorIn = matFloor(8);
@@ -48,109 +56,69 @@ export function buildLevel(scene) {
   const mMetal = matMetal(2);
   const mRoof = matConcrete(6);
 
-  // --- Global ground (outdoor yard) ---
-  // We'll put everything on a large base plane, with indoor floor on top where needed.
+  // ---------- Ground ----------
   const groundSize = 400;
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(groundSize, groundSize, 64, 64),
+    new THREE.PlaneGeometry(groundSize, groundSize, 96, 96),
     mFloorOut,
   );
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
-  // Some gentle unevenness
   const pos = ground.geometry.attributes.position;
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i), y = pos.getY(i);
     if (Math.abs(x) > 50 || Math.abs(y) > 50) {
-      pos.setZ(i, (Math.sin(x * 0.08) + Math.cos(y * 0.07)) * 0.18 + (Math.random() - 0.5) * 0.12);
+      pos.setZ(i, (Math.sin(x * 0.08) + Math.cos(y * 0.07)) * 0.25 + (Math.random() - 0.5) * 0.18);
     }
   }
   pos.needsUpdate = true;
   ground.geometry.computeVertexNormals();
   root.add(ground);
 
-  // --- Factory bounding envelope ---
-  // Admin (small)   : x -40..-10, z -20..20  (enter from -40)
-  // Production (big): x -10..40,  z -24..24
-  // Warehouse       : x  40..70,  z -18..18
-  // Tunnels         : x  40..70,  z  18..30  (low, narrow) -> leads out
-  // Outdoor yard    : x anywhere outside factory, truck at x=85,z=0
-
-  // Helper to build a walled room with roof.
+  // ---------- Factory rooms ----------
   function buildRoom(x0, z0, x1, z1, floorY, wallH, { wall = mWall, floorMat = mFloorIn, roofMat = mRoof, thickness = 0.5, doors = [] } = {}) {
     const y0 = floorY, y1 = floorY + wallH;
-    // Floor
     blockBox(root, colliders, [x0, y0 - 0.25, z0], [x1, y0, z1], floorMat, { collide: false });
-    // Roof — NON-CASTING so sunlight floods the interior without being blocked by the ceiling.
-    // The roof mesh is still visible but doesn't appear in the shadow map.
     blockBox(root, colliders, [x0, y1, z0], [x1, y1 + thickness, z1], roofMat, { collide: false, cast: false });
 
-    // Walls with door gaps. doors = [{ side: 'N'|'S'|'E'|'W', at:number, width }]
     const wallsByFace = { N: z1 - thickness, S: z0, E: x1 - thickness, W: x0 };
-
     function wallRow(face) {
       if (face === 'N' || face === 'S') {
-        // Along X
         const doorsOnFace = doors.filter(d => d.side === face).sort((a, b) => a.at - b.at);
         let cursor = x0;
         for (const d of doorsOnFace) {
           const dx0 = d.at - d.width / 2;
-          if (dx0 > cursor) {
-            blockBox(root, colliders,
-              [cursor, y0, wallsByFace[face]],
-              [dx0, y1, wallsByFace[face] + thickness], wall);
-          }
+          if (dx0 > cursor) blockBox(root, colliders, [cursor, y0, wallsByFace[face]], [dx0, y1, wallsByFace[face] + thickness], wall);
           cursor = d.at + d.width / 2;
-          // Lintel above door
-          blockBox(root, colliders,
-            [dx0, y1 - 1.0, wallsByFace[face]],
-            [cursor, y1, wallsByFace[face] + thickness], wall);
+          blockBox(root, colliders, [dx0, y1 - 1.0, wallsByFace[face]], [cursor, y1, wallsByFace[face] + thickness], wall);
         }
-        if (cursor < x1) {
-          blockBox(root, colliders,
-            [cursor, y0, wallsByFace[face]],
-            [x1, y1, wallsByFace[face] + thickness], wall);
-        }
+        if (cursor < x1) blockBox(root, colliders, [cursor, y0, wallsByFace[face]], [x1, y1, wallsByFace[face] + thickness], wall);
       } else {
         const doorsOnFace = doors.filter(d => d.side === face).sort((a, b) => a.at - b.at);
         let cursor = z0;
         for (const d of doorsOnFace) {
           const dz0 = d.at - d.width / 2;
-          if (dz0 > cursor) {
-            blockBox(root, colliders,
-              [wallsByFace[face], y0, cursor],
-              [wallsByFace[face] + thickness, y1, dz0], wall);
-          }
+          if (dz0 > cursor) blockBox(root, colliders, [wallsByFace[face], y0, cursor], [wallsByFace[face] + thickness, y1, dz0], wall);
           cursor = d.at + d.width / 2;
-          blockBox(root, colliders,
-            [wallsByFace[face], y1 - 1.0, dz0],
-            [wallsByFace[face] + thickness, y1, cursor], wall);
+          blockBox(root, colliders, [wallsByFace[face], y1 - 1.0, dz0], [wallsByFace[face] + thickness, y1, cursor], wall);
         }
-        if (cursor < z1) {
-          blockBox(root, colliders,
-            [wallsByFace[face], y0, cursor],
-            [wallsByFace[face] + thickness, y1, z1], wall);
-        }
+        if (cursor < z1) blockBox(root, colliders, [wallsByFace[face], y0, cursor], [wallsByFace[face] + thickness, y1, z1], wall);
       }
     }
     wallRow('N'); wallRow('S'); wallRow('E'); wallRow('W');
   }
 
-  // --- Zone 1: Admin corridor ---
+  // ---------- Zone 1: Admin ----------
   zones.admin = { min: new THREE.Vector3(-40, 0, -20), max: new THREE.Vector3(-10, 4, 20) };
   buildRoom(-40, -20, -10, 20, 0, 4, {
     doors: [
-      { side: 'S', at: -32, width: 3 },  // entrance from outside
-      { side: 'E', at: 10,  width: 3 },  // to production (east wall at x=-10, door along Z)
+      { side: 'S', at: -32, width: 3 },
+      { side: 'E', at: 10,  width: 3 },
     ],
   });
-
-  // Inner offices - partial walls
-  // Guard room: -40..-30, 10..20, with a doorway at z=16
   blockBox(root, colliders, [-30, 0, 10],   [-29, 3.2, 15], mWall);
   blockBox(root, colliders, [-30, 0, 17],   [-29, 3.2, 20], mWall);
-  blockBox(root, colliders, [-30, 2.2, 15], [-29, 3.2, 17], mWall); // lintel over door
-  // Corridor dividers (walk around on either end)
+  blockBox(root, colliders, [-30, 2.2, 15], [-29, 3.2, 17], mWall);
   blockBox(root, colliders, [-25, 0, -3], [-24, 3.2, 8], mWall);
   blockBox(root, colliders, [-25, 0, -20], [-24, 3.2, -13], mWall);
 
@@ -161,51 +129,71 @@ export function buildLevel(scene) {
     { x: -28, y: 0, z: -8, zone: 'admin' },
   );
 
-  // --- Zone 2: Main production hall ---
+  // A couple of admin-room crates & barrels
+  addProp(root, colliders, buildCrate({ x: -22, z: 17, w: 1.0, h: 0.9, d: 1.0 }));
+  addProp(root, colliders, buildCrate({ x: -16, z: -10, w: 1.2, h: 1.2, d: 1.0 }));
+  addProp(root, colliders, buildBarrel({ x: -20, z: 5, height: 1.0, color: 0x3a5a2a }));
+  addProp(root, colliders, buildBarrel({ x: -14, z: 15, height: 1.0, color: 0x4a2e1a }));
+
+  // ---------- Zone 2: Production ----------
   zones.production = { min: new THREE.Vector3(-10, 0, -24), max: new THREE.Vector3(40, 14, 24) };
   buildRoom(-10, -24, 40, 24, 0, 12, {
     wall: mWall2, roofMat: mMetal,
     doors: [
-      { side: 'W', at: 10,  width: 3 },   // from admin
-      { side: 'E', at: 0,   width: 4 },   // to warehouse
-      { side: 'S', at: 20,  width: 5 },   // big gate to outside yard
+      { side: 'W', at: 10,  width: 3 },
+      { side: 'E', at: 0,   width: 4 },
+      { side: 'S', at: 20,  width: 5 },
     ],
   });
 
-  // Support columns
+  // Columns
   for (let x = 0; x <= 30; x += 10) {
     for (let z = -15; z <= 15; z += 10) {
       blockBox(root, colliders, [x - 0.5, 0, z - 0.5], [x + 0.5, 11.5, z + 0.5], mMetal);
     }
   }
 
-  // Catwalks + metal ramps on two levels
-  // Lower conveyor line along Z at x=5
+  // Conveyor line with supports
   blockBox(root, colliders, [4, 1.0, -20], [7, 1.3, 20], mMetal, { collide: false });
   for (let z = -20; z <= 20; z += 3) {
     blockBox(root, colliders, [3.6, 0, z - 0.2], [4.0, 1.0, z + 0.2], mMetal);
     blockBox(root, colliders, [7.0, 0, z - 0.2], [7.4, 1.0, z + 0.2], mMetal);
   }
-  // Press machines
+  // Press machines with real detail
   for (const [px, pz] of [[14, -12], [22, -5], [28, 8], [20, 14]]) {
     blockBox(root, colliders, [px - 1.3, 0, pz - 1.3], [px + 1.3, 3.2, pz + 1.3], mMetal);
     blockBox(root, colliders, [px - 0.6, 3.2, pz - 0.6], [px + 0.6, 5.0, pz + 0.6], mMetal);
   }
-  // Upper catwalk
+  // Catwalk
   blockBox(root, colliders, [0, 6.2, -1], [38, 6.5, 1], mMetal, { collide: false });
-  // rails
   for (let x = 0; x <= 38; x += 2) {
     blockBox(root, colliders, [x - 0.05, 6.5, -1.05], [x + 0.05, 7.4, -0.95], mMetal);
     blockBox(root, colliders, [x - 0.05, 6.5, 0.95], [x + 0.05, 7.4, 1.05], mMetal);
   }
   blockBox(root, colliders, [0, 7.3, -1.05], [38, 7.4, -0.95], mMetal);
   blockBox(root, colliders, [0, 7.3, 0.95], [38, 7.4, 1.05], mMetal);
-  // Stairs up to catwalk
   for (let i = 0; i < 10; i++) {
     const y0 = i * 0.6;
-    blockBox(root, colliders,
-      [38 - i * 0.6, 0, -2.5],
-      [38 - i * 0.6 + 0.6, y0 + 0.6, -1.5], mMetal);
+    blockBox(root, colliders, [38 - i * 0.6, 0, -2.5], [38 - i * 0.6 + 0.6, y0 + 0.6, -1.5], mMetal);
+  }
+
+  // DETAILED PROPS in production
+  // Barrels grouped by pillars
+  for (const [bx, bz] of [[0, -18], [10, -20], [24, -18], [36, -4], [2, 20], [18, 22]]) {
+    addProp(root, colliders, buildBarrel({ x: bx, z: bz, height: 1.05, color: 0x3a2410 }));
+    if (Math.random() < 0.6) addProp(root, colliders, buildBarrel({ x: bx + 1.0, z: bz + 0.3, height: 1.05, color: 0x4a2e1a }));
+  }
+  // Crate stacks
+  addProp(root, colliders, buildCrate({ x: 12, z: 18, w: 1.2, h: 1.0, d: 1.2 }));
+  addProp(root, colliders, buildCrate({ x: 12, z: 18, y: 1.0, w: 1.0, h: 0.9, d: 1.0 }));
+  addProp(root, colliders, buildCrate({ x: 32, z: -18, w: 1.4, h: 1.1, d: 1.4 }));
+  addProp(root, colliders, buildCrate({ x: 32, z: -16.5, w: 1.0, h: 0.9, d: 1.0 }));
+  // Industrial pipes running overhead (visual only)
+  for (let x = -8; x < 40; x += 6) {
+    const p = buildPipeSegment({ x: x + 2, z: -22.5, y: 9.5, length: 5, radius: 0.2, color: 0x5a4a30 });
+    root.add(p.group);
+    const p2 = buildPipeSegment({ x: x + 2, z: 22.5, y: 9.5, length: 5, radius: 0.2, color: 0x4a5a4a });
+    root.add(p2.group);
   }
 
   patrolPoints.push(
@@ -215,48 +203,53 @@ export function buildLevel(scene) {
     { x: 35, y: 0, z: 10, zone: 'production' },
     { x: 10, y: 0, z: 18, zone: 'production' },
     { x: 25, y: 0, z: 20, zone: 'production' },
-    { x: 18, y: 6.5, z: 0, zone: 'production' }, // catwalk
+    { x: 18, y: 6.5, z: 0, zone: 'production' },
   );
 
-  // --- Zone 3: Warehouse ---
+  // ---------- Zone 3: Warehouse ----------
   zones.warehouse = { min: new THREE.Vector3(40, 0, -18), max: new THREE.Vector3(70, 8, 18) };
   buildRoom(40, -18, 70, 18, 0, 7.5, {
     wall: mWall2, roofMat: mMetal,
     doors: [
-      { side: 'W', at: 0, width: 4 }, // from production
-      { side: 'S', at: 60, width: 3 }, // to tunnels entry (south-east corner)
-      { side: 'E', at: 0, width: 3 }, // to outdoor yard (east)
+      { side: 'W', at: 0, width: 4 },
+      { side: 'S', at: 60, width: 3 },
+      { side: 'E', at: 0, width: 3 },
     ],
   });
-
-  // Racks
+  // Racks (uprights + horizontal shelves, collidable uprights only)
   for (let rz = -14; rz <= 14; rz += 7) {
     for (let rx = 45; rx <= 65; rx += 2.5) {
-      // uprights
       blockBox(root, colliders, [rx - 0.1, 0, rz - 1.5], [rx + 0.1, 6.5, rz - 1.3], mMetal);
       blockBox(root, colliders, [rx - 0.1, 0, rz + 1.3], [rx + 0.1, 6.5, rz + 1.5], mMetal);
     }
-    // shelves
     for (let sy = 1.4; sy <= 5.8; sy += 2.2) {
       blockBox(root, colliders, [44.8, sy, rz - 1.5], [65.2, sy + 0.15, rz + 1.5], mMetal, { collide: false });
     }
-    // crates on shelves
-    for (let cx = 45; cx <= 64; cx += 2 + Math.random() * 1.5) {
-      for (let sy = 1.55; sy <= 6; sy += 2.2) {
-        if (Math.random() < 0.55) {
-          const w = 1 + Math.random() * 0.8, h = 0.8 + Math.random() * 0.7;
-          blockBox(root, colliders, [cx, sy, rz - 1.2], [cx + w, sy + h, rz + 1.2], mMetal, { collide: false });
+  }
+  // Real crates + barrels on the shelves & floor
+  for (let rz = -14; rz <= 14; rz += 7) {
+    for (let sy = 1.55; sy <= 5.8; sy += 2.2) {
+      for (let cx = 46; cx <= 63; cx += 1.6 + Math.random() * 0.8) {
+        if (Math.random() < 0.4) {
+          addProp(root, colliders,
+            buildCrate({ x: cx, z: rz, y: sy, w: 1.0 + Math.random() * 0.3, h: 0.8 + Math.random() * 0.3, d: 1.0 + Math.random() * 0.3 }));
+        } else if (Math.random() < 0.6) {
+          addProp(root, colliders,
+            buildBarrel({ x: cx, z: rz, y: sy, height: 0.9 + Math.random() * 0.2, radius: 0.38 }));
         }
       }
     }
   }
-  // Scattered barrels/crates on floor
-  for (let i = 0; i < 25; i++) {
+  // Floor clutter
+  for (let i = 0; i < 18; i++) {
     const x = 42 + Math.random() * 26;
     const z = -16 + Math.random() * 32;
     if (Math.abs((z + 14) % 7) < 2) continue;
-    const w = 0.9 + Math.random() * 0.6;
-    blockBox(root, colliders, [x, 0, z], [x + w, w, z + w], mMetal);
+    if (Math.random() < 0.5) {
+      addProp(root, colliders, buildBarrel({ x, z, height: 1.05, radius: 0.42 }));
+    } else {
+      addProp(root, colliders, buildCrate({ x, z, w: 0.9 + Math.random() * 0.4, h: 0.8 + Math.random() * 0.3, d: 0.9 + Math.random() * 0.4 }));
+    }
   }
 
   patrolPoints.push(
@@ -267,20 +260,21 @@ export function buildLevel(scene) {
     { x: 65, y: 0, z: -10, zone: 'warehouse' },
   );
 
-  // --- Zone 4: Tunnels (narrow, low ceiling) ---
+  // ---------- Zone 4: Tunnels ----------
   zones.tunnels = { min: new THREE.Vector3(40, 0, 18), max: new THREE.Vector3(70, 3, 30) };
   buildRoom(40, 18, 70, 30, 0, 2.8, {
     wall: mMetal, roofMat: mMetal,
     doors: [
-      { side: 'N', at: 60, width: 3 }, // back to warehouse south
-      { side: 'E', at: 24, width: 3 }, // exit to outdoor yard
+      { side: 'N', at: 60, width: 3 },
+      { side: 'E', at: 24, width: 3 },
     ],
   });
-  // Pipes running along
   for (let x = 41; x < 70; x += 1.8) {
     blockBox(root, colliders, [x, 2.2, 19], [x + 0.3, 2.5, 29.5], mMetal, { collide: false });
   }
-  // A couple of low obstacles
+  // Real pipes running at waist height
+  addProp(root, colliders, buildPipeSegment({ x: 55, z: 22, y: 0.8, length: 24, radius: 0.15 }));
+  addProp(root, colliders, buildPipeSegment({ x: 55, z: 27, y: 0.8, length: 24, radius: 0.15, color: 0x3a4a55 }));
   blockBox(root, colliders, [48, 0, 22], [49.5, 1.2, 24], mMetal);
   blockBox(root, colliders, [58, 0, 25], [59.5, 1.2, 27], mMetal);
 
@@ -289,47 +283,89 @@ export function buildLevel(scene) {
     { x: 60, y: 0, z: 25, zone: 'tunnels' },
   );
 
-  // --- Zone 5: Outdoor yard ---
+  // ---------- Zone 5: Outdoor ----------
   zones.outdoor = { min: new THREE.Vector3(-100, 0, -100), max: new THREE.Vector3(100, 20, 100) };
 
-  // Perimeter fence (visual) - just blockers around yard
+  // Perimeter fence
   const fenceMat = mMetal;
   function fenceLine(x0, z0, x1, z1) {
-    if (x0 === x1) {
-      blockBox(root, colliders, [x0 - 0.15, 0, Math.min(z0, z1)], [x0 + 0.15, 2.8, Math.max(z0, z1)], fenceMat);
-    } else {
-      blockBox(root, colliders, [Math.min(x0, x1), 0, z0 - 0.15], [Math.max(x0, x1), 2.8, z0 + 0.15], fenceMat);
-    }
+    if (x0 === x1) blockBox(root, colliders, [x0 - 0.15, 0, Math.min(z0, z1)], [x0 + 0.15, 2.8, Math.max(z0, z1)], fenceMat);
+    else blockBox(root, colliders, [Math.min(x0, x1), 0, z0 - 0.15], [Math.max(x0, x1), 2.8, z0 + 0.15], fenceMat);
   }
-  // perimeter around the factory footprint (with gaps near exits)
   fenceLine(-90, -70, -90, 70);
   fenceLine(90, -70, 90, 70);
   fenceLine(-90, -70, 90, -70);
-  // North side open for dramatic fog
 
-  // Scattered outdoor props: rusty cars, containers, concrete blocks
-  for (let i = 0; i < 12; i++) {
-    const x = 80 + Math.random() * 8 - 4;
-    const z = -60 + i * 10 + (Math.random() - 0.5) * 3;
-    blockBox(root, colliders, [x, 0, z], [x + 2.4, 1.4, z + 5], mMetal); // container
-    blockBox(root, colliders, [x + 0.2, 1.4, z + 0.2], [x + 2.2, 1.42, z + 4.8], mMetal, { collide: false });
+  // --- Shipping containers along east fence ---
+  for (let i = 0; i < 6; i++) {
+    const zBase = -55 + i * 20 + (Math.random() - 0.5) * 4;
+    const color = choose([0x6a1f1f, 0x1f4a6a, 0x5a5a1f, 0x2a5a2a, 0x6a4a1f]);
+    const c = buildContainer({ x: 82 + (Math.random() - 0.5) * 2, z: zBase, length: 6, width: 2.4, height: 2.6, color });
+    c.group.rotation.y = Math.PI / 2 + (Math.random() - 0.5) * 0.2;
+    addProp(root, colliders, c);
+    if (Math.random() < 0.5) {
+      const c2 = buildContainer({ x: 82 + (Math.random() - 0.5) * 2, z: zBase, y: 2.75, length: 6, width: 2.4, height: 2.6, color: choose([0x4a2a2a, 0x2a4a4a, 0x4a4a2a]) });
+      c2.group.rotation.y = Math.PI / 2 + (Math.random() - 0.5) * 0.2;
+      addProp(root, colliders, c2);
+    }
   }
-  for (let i = 0; i < 20; i++) {
-    const x = -80 + Math.random() * 160;
-    const z = -90 + Math.random() * 180;
-    if (Math.abs(x) < 45 || (z > -26 && z < 32 && x > -42 && x < 72)) continue; // skip near factory
-    blockBox(root, colliders, [x, 0, z], [x + 1.6, 0.8, z + 1], mMetal);
+
+  // --- Shipping containers to the west (make an outdoor area with cover) ---
+  for (let i = 0; i < 4; i++) {
+    const xBase = -70 + i * 12 + (Math.random() - 0.5) * 3;
+    const color = choose([0x6a1f1f, 0x1f4a6a, 0x5a5a1f, 0x2a5a2a]);
+    const c = buildContainer({ x: xBase, z: -40 + (Math.random() - 0.5) * 4, length: 6, width: 2.4, height: 2.6, color });
+    addProp(root, colliders, c);
   }
-  // Hi grass bushes (visual) - cross planes
+
+  // --- Rusty cars scattered ---
+  for (let i = 0; i < 5; i++) {
+    const x = -60 + i * 25 + (Math.random() - 0.5) * 6;
+    const z = 40 + (Math.random() - 0.5) * 10;
+    addProp(root, colliders, buildRustyCar({ x, z }));
+  }
+  addProp(root, colliders, buildRustyCar({ x: -55, z: -20 }));
+  addProp(root, colliders, buildRustyCar({ x: -25, z: -45 }));
+
+  // --- Concrete barriers near outside entrance ---
+  for (let i = 0; i < 5; i++) {
+    addProp(root, colliders, buildConcreteBarrier({ x: 22 + i * 2.3, z: -30 }));
+  }
+
+  // --- Rocks around the yard ---
+  for (let i = 0; i < 40; i++) {
+    const x = -85 + Math.random() * 170;
+    const z = -85 + Math.random() * 170;
+    if (x > -45 && x < 72 && z > -26 && z < 32) continue;
+    if (x > 80 && x < 90 && z > -65 && z < 65) continue;
+    const size = 0.3 + Math.random() * 0.9;
+    addProp(root, colliders, buildRock({ x, z, size }));
+  }
+
+  // --- Trees (pines + some dead broadleafs) ---
+  const treeCount = 60;
+  for (let i = 0; i < treeCount; i++) {
+    const x = -85 + Math.random() * 170;
+    const z = -85 + Math.random() * 170;
+    if (x > -45 && x < 72 && z > -26 && z < 32) continue;
+    if (x > 78 && x < 92 && z > -65 && z < 65) continue;
+    const scale = 0.8 + Math.random() * 0.8;
+    if (Math.random() < 0.75) {
+      addProp(root, colliders, buildTree({ x, z, scale, dry: Math.random() < 0.2 }));
+    } else {
+      addProp(root, colliders, buildBroadleaf({ x, z, scale }));
+    }
+  }
+
+  // --- High grass patches (cross planes) ---
   const grassMat = new THREE.MeshStandardMaterial({
     color: 0x5a6a38, roughness: 1, transparent: true, alphaTest: 0.35, side: THREE.DoubleSide, depthWrite: true,
   });
-  // Build a grass texture once
   const gc = document.createElement('canvas'); gc.width = gc.height = 128;
   const gg = gc.getContext('2d');
   gg.clearRect(0, 0, 128, 128);
   for (let i = 0; i < 70; i++) {
-    gg.strokeStyle = `rgba(${60 + Math.random()*30},${80 + Math.random()*40},${30 + Math.random()*20},${0.7})`;
+    gg.strokeStyle = `rgba(${60 + Math.random() * 30},${80 + Math.random() * 40},${30 + Math.random() * 20},${0.7})`;
     gg.lineWidth = 1 + Math.random() * 1.5;
     gg.beginPath();
     const x = Math.random() * 128;
@@ -339,11 +375,10 @@ export function buildLevel(scene) {
   }
   const grassTex = new THREE.CanvasTexture(gc); grassTex.needsUpdate = true;
   grassMat.map = grassTex; grassMat.alphaMap = grassTex; grassMat.needsUpdate = true;
-
   for (let i = 0; i < 300; i++) {
     const x = -90 + Math.random() * 180;
     const z = -90 + Math.random() * 180;
-    if (x > -45 && x < 72 && z > -26 && z < 32) continue; // skip indoors area
+    if (x > -45 && x < 72 && z > -26 && z < 32) continue;
     if (x > 80 && x < 90 && z > -65 && z < 65) continue;
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.2), grassMat);
     mesh.position.set(x, 0.6, z);
@@ -352,66 +387,27 @@ export function buildLevel(scene) {
     const mesh2 = mesh.clone(); mesh2.rotation.y += Math.PI / 2; root.add(mesh2);
   }
 
-  // Flood/prospect light pole pointing at yard
-  // (light itself added by main; here just a pole)
+  // --- Floodlight pole (visible but off during daytime) ---
   blockBox(root, colliders, [-10, 0, -60], [-9.5, 10, -59.5], mMetal);
   blockBox(root, colliders, [-10, 10, -62], [-6, 10.5, -58], mMetal, { collide: false });
 
-  // --- YELLOW TRUCK ---
-  const truckGroup = new THREE.Group();
-  const truckPos = new THREE.Vector3(85, 0, 0);
-  truckGroup.position.copy(truckPos);
-  // chassis
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xd9a614, roughness: 0.55, metalness: 0.4 });
-  const darkMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9 });
-  const glassMat = new THREE.MeshStandardMaterial({ color: 0x223038, roughness: 0.15, metalness: 0.6, transparent: true, opacity: 0.6 });
-  function addTruckBox(group, min, max, m) {
-    const geom = new THREE.BoxGeometry(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
-    const mesh = new THREE.Mesh(geom, m);
-    mesh.position.set((min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2);
-    mesh.castShadow = true; mesh.receiveShadow = true;
-    group.add(mesh);
-  }
-  // cab
-  addTruckBox(truckGroup, [0, 0.9, -1.6], [2.2, 2.6, 1.6], bodyMat);
-  // hood
-  addTruckBox(truckGroup, [2.2, 0.9, -1.6], [3.6, 2.0, 1.6], bodyMat);
-  // windows
-  addTruckBox(truckGroup, [0.3, 1.9, -1.4], [2.0, 2.55, 1.4], glassMat);
-  // bed / rear cargo
-  addTruckBox(truckGroup, [-2.8, 0.8, -1.6], [0, 2.4, 1.6], bodyMat);
-  // wheels
-  for (const [wx, wz] of [[2.8, -1.5], [2.8, 1.5], [-2.0, -1.5], [-2.0, 1.5]]) {
-    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 0.5, 16), darkMat);
-    wheel.rotation.z = Math.PI / 2;
-    wheel.position.set(wx, 0.55, wz);
-    wheel.castShadow = true;
-    truckGroup.add(wheel);
-  }
-  // headlights
-  const headlightMat = new THREE.MeshStandardMaterial({ color: 0xfff1c4, emissive: 0xfff1c4, emissiveIntensity: 0.4 });
-  const hl1 = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.25, 0.35), headlightMat);
-  hl1.position.set(3.6, 1.6, -1.1); truckGroup.add(hl1);
-  const hl2 = hl1.clone(); hl2.position.z = 1.1; truckGroup.add(hl2);
-  truckGroup.userData.headlights = [hl1, hl2];
-
-  root.add(truckGroup);
-  // Collider for truck (rough block)
-  colliders.add([truckPos.x - 3, 0, truckPos.z - 1.6], [truckPos.x + 3.6, 2.6, truckPos.z + 1.6]);
-
+  // ---------- YELLOW TRUCK (detailed) ----------
+  const truckPos = new THREE.Vector3(82, 0, 0);
+  const truckProp = buildYellowTruck({ x: truckPos.x, z: truckPos.z });
+  addProp(root, colliders, truckProp);
   const truck = {
-    group: truckGroup,
+    group: truckProp.group,
     position: truckPos,
     hasPower: false,
     hasKey: false,
     running: false,
-    escapeProgress: 0, // 0..1
-    headlights: [hl1, hl2],
+    escapeProgress: 0,
+    headlights: truckProp.group.userData.headlights || [],
   };
   interactables.push({
     kind: 'truck', truck,
-    position: new THREE.Vector3(truckPos.x + 1.1, 1.4, truckPos.z + 1.7),
-    radius: 2.2,
+    position: new THREE.Vector3(truckPos.x + 1.4, 1.8, truckPos.z + 1.4),
+    radius: 3.2,
     label: () =>
       !truck.hasPower ? 'E: First restore factory power'
       : !truck.hasKey ? 'E: Find the key'
@@ -419,13 +415,15 @@ export function buildLevel(scene) {
       : 'E: DRIVE AWAY',
   });
 
-  // --- POWER SWITCH (in admin guard room) ---
+  // ---------- POWER SWITCH ----------
   const switchPos = new THREE.Vector3(-37, 1.2, 15);
   const sw = new THREE.Group();
   const panel = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.2, 0.15), mMetal);
   sw.add(panel);
-  const lever = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.5, 0.08),
-    new THREE.MeshStandardMaterial({ color: 0x992222, emissive: 0x441111, emissiveIntensity: 0.5 }));
+  const lever = new THREE.Mesh(
+    new THREE.BoxGeometry(0.08, 0.5, 0.08),
+    new THREE.MeshStandardMaterial({ color: 0x992222, emissive: 0x441111, emissiveIntensity: 0.5 }),
+  );
   lever.position.set(0, 0.2, 0.12);
   lever.rotation.x = -0.5;
   sw.add(lever);
@@ -439,7 +437,7 @@ export function buildLevel(scene) {
     label: () => 'E: Restore power',
   });
 
-  // --- KEY (somewhere in warehouse — hidden behind racks) ---
+  // ---------- KEY ----------
   const keyPos = new THREE.Vector3(64, 0.9, -10);
   const keyGroup = new THREE.Group();
   const keyBody = new THREE.Mesh(
@@ -463,43 +461,42 @@ export function buildLevel(scene) {
     label: () => 'E: Pick up key',
   });
 
-  // --- Ambient throwables (bottles, pipes, bricks, cans) ---
-  function addThrowable(x, y, z, type) {
-    throwables.push({ x, y, z, type });
-  }
-  for (let i = 0; i < 14; i++) {
-    addThrowable(-35 + Math.random() * 25, 0.15, -15 + Math.random() * 30, choose(['bottle', 'can']));
-  }
-  for (let i = 0; i < 20; i++) {
-    addThrowable(-5 + Math.random() * 40, 0.15, -20 + Math.random() * 40, choose(['bottle', 'pipe', 'brick']));
-  }
-  for (let i = 0; i < 18; i++) {
-    addThrowable(42 + Math.random() * 26, 0.15, -16 + Math.random() * 32, choose(['can', 'pipe', 'brick']));
-  }
-  for (let i = 0; i < 8; i++) {
-    addThrowable(42 + Math.random() * 26, 0.15, 20 + Math.random() * 8, choose(['pipe', 'can']));
-  }
+  // ---------- Throwables ----------
+  function addThrowable(x, y, z, type) { throwables.push({ x, y, z, type }); }
+  for (let i = 0; i < 14; i++) addThrowable(-35 + Math.random() * 25, 0.15, -15 + Math.random() * 30, choose(['bottle', 'can']));
+  for (let i = 0; i < 20; i++) addThrowable(-5 + Math.random() * 40, 0.15, -20 + Math.random() * 40, choose(['bottle', 'pipe', 'brick']));
+  for (let i = 0; i < 18; i++) addThrowable(42 + Math.random() * 26, 0.15, -16 + Math.random() * 32, choose(['can', 'pipe', 'brick']));
+  for (let i = 0; i < 8; i++) addThrowable(42 + Math.random() * 26, 0.15, 20 + Math.random() * 8, choose(['pipe', 'can']));
 
-  // --- Skeleton spawn points (spread across zones) ---
+  // ---------- 20 skeleton spawn points ----------
   spawnPoints.push(
-    { x: -18, y: 0, z: -12 }, { x: -14, y: 0, z: 14 },          // admin (2)
-    { x: 8, y: 0, z: -16 }, { x: 22, y: 0, z: -8 },
-    { x: 30, y: 0, z: 12 }, { x: 14, y: 0, z: 18 },             // production (4)
-    { x: 52, y: 0, z: -10 }, { x: 62, y: 0, z: 6 },              // warehouse (2)
-    { x: 48, y: 0, z: 24 },                                      // tunnels (1)
-    { x: 78, y: 0, z: 20 },                                      // outdoor near fence (1)
+    // Admin (2)
+    { x: -18, y: 0, z: -12 }, { x: -14, y: 0, z: 14 },
+    // Production (6)
+    { x:  6, y: 0, z: -18 }, { x: 22, y: 0, z: -8 },
+    { x: 30, y: 0, z: 12 },  { x: 14, y: 0, z: 18 },
+    { x:  4, y: 0, z: -4 },  { x: 36, y: 0, z: -16 },
+    // Warehouse (4)
+    { x: 48, y: 0, z: -10 }, { x: 62, y: 0, z:  6 },
+    { x: 54, y: 0, z: 12 },  { x: 66, y: 0, z: -14 },
+    // Tunnels (2)
+    { x: 48, y: 0, z: 24 },  { x: 62, y: 0, z: 27 },
+    // Outdoor (6) — surround the player from multiple sides
+    { x:  78, y: 0, z: 20 },
+    { x: -30, y: 0, z: -40 },
+    { x: -50, y: 0, z:  10 },
+    { x: -20, y: 0, z:  50 },
+    { x:  40, y: 0, z: -45 },
+    { x:  70, y: 0, z: -50 },
   );
 
-  // -- Scatter ambient detail: broken concrete, random rotated debris (visual only) --
+  // ---------- Ambient detail: rubble, hanging chains ----------
   for (let i = 0; i < 80; i++) {
     const inFactory = Math.random() < 0.7;
     let x, z;
-    if (inFactory) {
-      x = -30 + Math.random() * 90; z = -20 + Math.random() * 40;
-    } else {
-      x = -80 + Math.random() * 160; z = -80 + Math.random() * 160;
-      if (x > -45 && x < 72 && z > -26 && z < 32) continue;
-    }
+    if (inFactory) { x = -30 + Math.random() * 90; z = -20 + Math.random() * 40; }
+    else { x = -80 + Math.random() * 160; z = -80 + Math.random() * 160;
+      if (x > -45 && x < 72 && z > -26 && z < 32) continue; }
     const g = new THREE.BoxGeometry(0.3 + Math.random() * 0.4, 0.1 + Math.random() * 0.15, 0.3 + Math.random() * 0.4);
     const m = new THREE.Mesh(g, mRoof);
     m.position.set(x, 0.05, z);
@@ -507,8 +504,6 @@ export function buildLevel(scene) {
     m.castShadow = true; m.receiveShadow = true;
     root.add(m);
   }
-
-  // hanging chain decorations
   for (let i = 0; i < 10; i++) {
     const x = Math.random() * 38;
     const z = -20 + Math.random() * 40;
@@ -521,20 +516,11 @@ export function buildLevel(scene) {
   }
 
   return {
-    root,
-    colliders,
-    zones,
-    patrolPoints,
-    interactables,
-    throwables,
-    spawnPoints,
-    truck,
+    root, colliders, zones, patrolPoints, interactables, throwables, spawnPoints, truck,
   };
 }
 
-// Determine zone name for a world XZ point (for audio / AI hints).
 export function zoneAt(zones, x, z) {
-  // Check specific interior zones first; fall back to outdoor.
   const order = ['admin', 'production', 'warehouse', 'tunnels'];
   for (const name of order) {
     const z2 = zones[name];
