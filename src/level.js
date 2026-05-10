@@ -81,8 +81,9 @@ export function buildLevel(scene) {
     const y0 = floorY, y1 = floorY + wallH;
     // Floor
     blockBox(root, colliders, [x0, y0 - 0.25, z0], [x1, y0, z1], floorMat, { collide: false });
-    // Roof (with gaps for cinematic light shafts added separately)
-    blockBox(root, colliders, [x0, y1, z0], [x1, y1 + thickness, z1], roofMat, { collide: false });
+    // Roof — NON-CASTING so sunlight floods the interior without being blocked by the ceiling.
+    // The roof mesh is still visible but doesn't appear in the shadow map.
+    blockBox(root, colliders, [x0, y1, z0], [x1, y1 + thickness, z1], roofMat, { collide: false, cast: false });
 
     // Walls with door gaps. doors = [{ side: 'N'|'S'|'E'|'W', at:number, width }]
     const wallsByFace = { N: z1 - thickness, S: z0, E: x1 - thickness, W: x0 };

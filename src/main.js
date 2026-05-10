@@ -55,7 +55,7 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.15;
+renderer.toneMappingExposure = 1.35;
 
 // --- Scene ---
 const scene = new THREE.Scene();
@@ -88,12 +88,12 @@ scene.add(sun.target);
 // Keep a handle for the escape sequence (renamed from `moon` semantically)
 const moon = sun;
 
-// Sky hemi (warm sky above / earthy ground)
-const hemi = new THREE.HemisphereLight(0x9fc8ef, 0x6b5a3f, 1.15);
+// Sky hemi (warm sky above / earthy ground) — strong so interiors read bright
+const hemi = new THREE.HemisphereLight(0xcfe2f5, 0xa28b62, 2.0);
 scene.add(hemi);
 
-// Ambient fill so indoors stays readable
-scene.add(new THREE.AmbientLight(0xc2d4e8, 0.55));
+// Ambient fill: big and warm so indoors is never dark
+scene.add(new THREE.AmbientLight(0xe7dcc4, 1.2));
 
 // Flickering interior fluorescents (placed later after level created)
 
@@ -108,9 +108,9 @@ const cinematicShader = {
   uniforms: {
     tDiffuse: { value: null },
     uTime: { value: 0 },
-    uVignette: { value: 0.8 },
-    uGrain: { value: 0.04 },
-    uCA: { value: 0.0016 },
+    uVignette: { value: 0.6 },
+    uGrain: { value: 0.02 },
+    uCA: { value: 0.0008 },
     uDamage: { value: 0.0 },
   },
   vertexShader: /*glsl*/`
@@ -136,10 +136,10 @@ const cinematicShader = {
       col.b = texture2D(tDiffuse, uv - ctr * ca).b;
       col.a = 1.0;
 
-      // Vignette (gentle in daylight)
+      // Very gentle vignette so daytime stays bright edge-to-edge
       float d = length(ctr);
-      float v = smoothstep(0.95, 0.25, d * uVignette);
-      col.rgb *= mix(0.72, 1.0, v);
+      float v = smoothstep(1.15, 0.15, d * uVignette);
+      col.rgb *= mix(0.9, 1.0, v);
 
       // Grain
       float n = rand(uv * vec2(1024.0, 768.0) + uTime) - 0.5;
@@ -147,10 +147,6 @@ const cinematicShader = {
 
       // Damage: slight red tint + higher grain when damaged
       col.rgb = mix(col.rgb, col.rgb * vec3(1.1, 0.7, 0.7), uDamage * 0.4);
-
-      // Very subtle desaturation
-      float y = dot(col.rgb, vec3(0.299, 0.587, 0.114));
-      col.rgb = mix(vec3(y), col.rgb, 0.97);
 
       gl_FragColor = col;
     }
@@ -189,20 +185,20 @@ function addFlickerLight(x, y, z, color = 0xffd796, intensity = 1.2, dist = 14) 
   scene.add(bulb);
   flickeringLights.push({ light, bulb, baseIntensity: intensity, flicker: Math.random() });
 }
-// Admin corridor lights (dim, daylight already fills most areas)
-for (let x = -38; x <= -12; x += 8) addFlickerLight(x, 3.5, 0, 0xfff1c4, 0.55, 9);
+// Admin corridor lights
+for (let x = -38; x <= -12; x += 8) addFlickerLight(x, 3.5, 0, 0xfff1c4, 1.1, 12);
 // Production: big shafts
-addFlickerLight(-5, 11, 0, 0xffd796, 0.9, 26);
-addFlickerLight(20, 11, 0, 0xb6d7ff, 0.7, 22);
-addFlickerLight(35, 11, 10, 0xffd796, 0.6, 20);
-addFlickerLight(5, 11, -18, 0xffa060, 0.6, 16);
+addFlickerLight(-5, 11, 0, 0xffd796, 1.8, 32);
+addFlickerLight(20, 11, 0, 0xb6d7ff, 1.5, 28);
+addFlickerLight(35, 11, 10, 0xffd796, 1.3, 24);
+addFlickerLight(5, 11, -18, 0xffa060, 1.1, 18);
 // Warehouse
-addFlickerLight(45, 7, -10, 0xffc779, 0.55, 14);
-addFlickerLight(60, 7, 8, 0xffa550, 0.45, 12);
-addFlickerLight(66, 7, -4, 0xcfddff, 0.35, 10);
+addFlickerLight(45, 7, -10, 0xffc779, 1.2, 16);
+addFlickerLight(60, 7, 8, 0xffa550, 1.0, 14);
+addFlickerLight(66, 7, -4, 0xcfddff, 0.7, 12);
 // Tunnels (dim red emergency)
-addFlickerLight(50, 2.5, 24, 0xff3322, 0.5, 9);
-addFlickerLight(62, 2.5, 27, 0xff3322, 0.35, 9);
+addFlickerLight(50, 2.5, 24, 0xff3322, 0.8, 11);
+addFlickerLight(62, 2.5, 27, 0xff3322, 0.6, 11);
 
 // Outdoor floodlight on pole (off during daytime)
 const flood = new THREE.SpotLight(0xf4e2b8, 0.0, 80, Math.PI / 5, 0.5, 1);
