@@ -55,48 +55,52 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+renderer.toneMappingExposure = 1.15;
 
 // --- Scene ---
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x1b2430); // dusk sky tint
-scene.fog = new THREE.FogExp2(0x1b2430, 0.012);
+// Bright clear daytime sky
+scene.background = new THREE.Color(0x8ec5ff);
+// Very thin atmospheric haze so objects stay crisp
+scene.fog = new THREE.FogExp2(0xbfd6ef, 0.0045);
 
 // --- Camera ---
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.05, 400);
 
 // --- Lighting ---
-// Strong late-sun / moon directional: illuminates yard well,
-// while interiors still read as dark because sunlight mostly can't reach them.
-const moon = new THREE.DirectionalLight(0xf6d6a8, 2.4);
-moon.position.set(-80, 90, 50);
-moon.castShadow = true;
-moon.shadow.mapSize.width = 2048;
-moon.shadow.mapSize.height = 2048;
-moon.shadow.camera.left = -100;
-moon.shadow.camera.right = 100;
-moon.shadow.camera.top = 100;
-moon.shadow.camera.bottom = -100;
-moon.shadow.camera.near = 1;
-moon.shadow.camera.far = 260;
-moon.shadow.bias = -0.0004;
-moon.shadow.normalBias = 0.04;
-scene.add(moon);
-scene.add(moon.target);
+// Strong warm sun -- lights the whole yard brilliantly,
+// while interiors still read moodier because walls/roofs block direct light.
+const sun = new THREE.DirectionalLight(0xfff1cf, 3.8);
+sun.position.set(-60, 110, 70);
+sun.castShadow = true;
+sun.shadow.mapSize.width = 2048;
+sun.shadow.mapSize.height = 2048;
+sun.shadow.camera.left = -110;
+sun.shadow.camera.right = 110;
+sun.shadow.camera.top = 110;
+sun.shadow.camera.bottom = -110;
+sun.shadow.camera.near = 1;
+sun.shadow.camera.far = 300;
+sun.shadow.bias = -0.0004;
+sun.shadow.normalBias = 0.04;
+scene.add(sun);
+scene.add(sun.target);
+// Keep a handle for the escape sequence (renamed from `moon` semantically)
+const moon = sun;
 
-// Sky hemi (warm above / cool ground)
-const hemi = new THREE.HemisphereLight(0xc7d7ea, 0x2a1f15, 0.65);
+// Sky hemi (warm sky above / earthy ground)
+const hemi = new THREE.HemisphereLight(0x9fc8ef, 0x6b5a3f, 1.15);
 scene.add(hemi);
 
-// Small ambient fill so indoors isn't pitch black
-scene.add(new THREE.AmbientLight(0x232730, 0.3));
+// Ambient fill so indoors stays readable
+scene.add(new THREE.AmbientLight(0xc2d4e8, 0.55));
 
 // Flickering interior fluorescents (placed later after level created)
 
 // --- Postprocessing ---
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.7, 0.85);
+const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.35, 0.9, 0.92);
 composer.addPass(bloom);
 
 // Custom cinematic pass: vignette + grain + chromatic aberration
@@ -104,9 +108,9 @@ const cinematicShader = {
   uniforms: {
     tDiffuse: { value: null },
     uTime: { value: 0 },
-    uVignette: { value: 1.2 },
-    uGrain: { value: 0.08 },
-    uCA: { value: 0.0028 },
+    uVignette: { value: 0.8 },
+    uGrain: { value: 0.04 },
+    uCA: { value: 0.0016 },
     uDamage: { value: 0.0 },
   },
   vertexShader: /*glsl*/`
@@ -132,10 +136,10 @@ const cinematicShader = {
       col.b = texture2D(tDiffuse, uv - ctr * ca).b;
       col.a = 1.0;
 
-      // Vignette
+      // Vignette (gentle in daylight)
       float d = length(ctr);
-      float v = smoothstep(0.85, 0.35, d * uVignette);
-      col.rgb *= mix(0.4, 1.0, v);
+      float v = smoothstep(0.95, 0.25, d * uVignette);
+      col.rgb *= mix(0.72, 1.0, v);
 
       // Grain
       float n = rand(uv * vec2(1024.0, 768.0) + uTime) - 0.5;
@@ -144,9 +148,9 @@ const cinematicShader = {
       // Damage: slight red tint + higher grain when damaged
       col.rgb = mix(col.rgb, col.rgb * vec3(1.1, 0.7, 0.7), uDamage * 0.4);
 
-      // Slight desaturation for mood
+      // Very subtle desaturation
       float y = dot(col.rgb, vec3(0.299, 0.587, 0.114));
-      col.rgb = mix(vec3(y), col.rgb, 0.92);
+      col.rgb = mix(vec3(y), col.rgb, 0.97);
 
       gl_FragColor = col;
     }
@@ -185,28 +189,25 @@ function addFlickerLight(x, y, z, color = 0xffd796, intensity = 1.2, dist = 14) 
   scene.add(bulb);
   flickeringLights.push({ light, bulb, baseIntensity: intensity, flicker: Math.random() });
 }
-// Admin corridor lights
-for (let x = -38; x <= -12; x += 8) addFlickerLight(x, 3.5, 0, 0xfff1c4, 0.9, 10);
+// Admin corridor lights (dim, daylight already fills most areas)
+for (let x = -38; x <= -12; x += 8) addFlickerLight(x, 3.5, 0, 0xfff1c4, 0.55, 9);
 // Production: big shafts
-addFlickerLight(-5, 11, 0, 0xffd796, 1.6, 30);
-addFlickerLight(20, 11, 0, 0xb6d7ff, 1.4, 25);
-addFlickerLight(35, 11, 10, 0xffd796, 1.2, 22);
-addFlickerLight(5, 11, -18, 0xffa060, 1.0, 18);
+addFlickerLight(-5, 11, 0, 0xffd796, 0.9, 26);
+addFlickerLight(20, 11, 0, 0xb6d7ff, 0.7, 22);
+addFlickerLight(35, 11, 10, 0xffd796, 0.6, 20);
+addFlickerLight(5, 11, -18, 0xffa060, 0.6, 16);
 // Warehouse
-addFlickerLight(45, 7, -10, 0xffc779, 1.1, 16);
-addFlickerLight(60, 7, 8, 0xffa550, 0.9, 14);
-addFlickerLight(66, 7, -4, 0xcfddff, 0.6, 12);
+addFlickerLight(45, 7, -10, 0xffc779, 0.55, 14);
+addFlickerLight(60, 7, 8, 0xffa550, 0.45, 12);
+addFlickerLight(66, 7, -4, 0xcfddff, 0.35, 10);
 // Tunnels (dim red emergency)
-addFlickerLight(50, 2.5, 24, 0xff3322, 0.7, 10);
-addFlickerLight(62, 2.5, 27, 0xff3322, 0.5, 10);
+addFlickerLight(50, 2.5, 24, 0xff3322, 0.5, 9);
+addFlickerLight(62, 2.5, 27, 0xff3322, 0.35, 9);
 
-// Outdoor floodlight on pole
-const flood = new THREE.SpotLight(0xf4e2b8, 2.2, 80, Math.PI / 5, 0.5, 1);
+// Outdoor floodlight on pole (off during daytime)
+const flood = new THREE.SpotLight(0xf4e2b8, 0.0, 80, Math.PI / 5, 0.5, 1);
 flood.position.set(-8, 10, -60);
 flood.target.position.set(20, 0, 0);
-flood.castShadow = true;
-flood.shadow.mapSize.width = 1024;
-flood.shadow.mapSize.height = 1024;
 scene.add(flood);
 scene.add(flood.target);
 

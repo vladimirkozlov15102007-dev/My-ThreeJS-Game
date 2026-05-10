@@ -15,9 +15,11 @@ const PISTOL = {
   damagePerHit: { head: 30, torso: 20, legs: 10 },
   range: 80,
   reloadTime: 1.3,
-  recoil: 0.035,   // pitch kick radians
-  spreadHip: 0.018,
-  spreadAim: 0.003,
+  recoilPitch: 0.085,   // pitch kick (up), radians per shot
+  recoilYaw: 0.025,     // max yaw kick (left/right), radians per shot
+  recoilKick: 0.12,     // viewmodel push-back amount (meters-ish in local space)
+  spreadHip: 0.028,
+  spreadAim: 0.006,
 };
 
 const SWORD = {
@@ -53,6 +55,10 @@ export class WeaponSystem {
     this.swordSwingT = 0;
     this.swordHitThisSwing = false;
     this.swordCooldown = 0;
+
+    // Viewmodel recoil spring (separate from camera pitch kick)
+    this.vmRecoil = 0;      // 0..1 spring position
+    this.vmRecoilVel = 0;   // velocity
 
     // Build weapon meshes on a viewmodel group (attached to camera)
     this.viewModel = new THREE.Group();
@@ -275,9 +281,16 @@ export class WeaponSystem {
     dir.y += (Math.random() - 0.5) * spread;
     dir.normalize();
 
-    // Recoil kick
-    player.recoilKick += PISTOL.recoil * (1 - this.aim * 0.5);
-    player.shakeT = Math.min(1.0, player.shakeT + 0.15);
+    // Recoil kick — camera pitch up, camera yaw random, and a big viewmodel spring.
+    // Aiming reduces recoil a bit but still very noticeable.
+    const aimReduce = (1 - this.aim * 0.35);
+    const pitchKick = PISTOL.recoilPitch * aimReduce * (0.9 + Math.random() * 0.25);
+    const yawKick = (Math.random() - 0.5) * 2 * PISTOL.recoilYaw * aimReduce;
+    player.recoilKick += pitchKick;
+    player.recoilYawKick += yawKick;
+    player.shakeT = Math.min(1.2, player.shakeT + 0.28);
+    // Viewmodel spring: shove it backward and up
+    this.vmRecoilVel += PISTOL.recoilKick * aimReduce * (0.85 + Math.random() * 0.3);
 
     // Muzzle flash
     this._muzzleFlash.material.opacity = 1.0;
@@ -336,6 +349,13 @@ export class WeaponSystem {
   }
 
   _updateViewmodel(dt, player) {
+    // Integrate viewmodel recoil spring (critically-damped-ish)
+    const springK = 60;   // stiffness
+    const damping = 11;   // damping
+    const springAcc = -springK * this.vmRecoil - damping * this.vmRecoilVel;
+    this.vmRecoilVel += springAcc * dt;
+    this.vmRecoil += this.vmRecoilVel * dt;
+
     // Pistol pose: lerp between hip and aim
     const p = new THREE.Vector3().copy(this._pistolBase).lerp(this._pistolAim, this.aim);
     // Bob
@@ -343,6 +363,10 @@ export class WeaponSystem {
     const bobX = Math.cos(player.bobT) * 0.01 * (1 - this.aim);
     p.y += bob;
     p.x += bobX;
+    // Apply recoil spring: push pistol back (+Z in local camera space), up a bit,
+    // tilt up by recoil amount
+    p.z += this.vmRecoil * 0.22;
+    p.y += this.vmRecoil * 0.05;
     // Reload kick down
     if (this.reloading) {
       const t = this.reloadT / PISTOL.reloadTime;
@@ -351,8 +375,10 @@ export class WeaponSystem {
       this.pistolMesh.rotation.x = -k * 1.2;
       this.pistolMesh.rotation.z = Math.sin(t * Math.PI * 2) * 0.08;
     } else {
-      this.pistolMesh.rotation.x = damp(this.pistolMesh.rotation.x, -player.recoilKick * 0.7, 12, dt);
+      const targetPitch = -player.recoilKick * 0.8 - this.vmRecoil * 0.6;
+      this.pistolMesh.rotation.x = damp(this.pistolMesh.rotation.x, targetPitch, 14, dt);
       this.pistolMesh.rotation.z = damp(this.pistolMesh.rotation.z, 0, 12, dt);
+      this.pistolMesh.rotation.y = damp(this.pistolMesh.rotation.y, -player.recoilYawKick * 0.4, 14, dt);
     }
     this.pistolMesh.position.copy(p);
 

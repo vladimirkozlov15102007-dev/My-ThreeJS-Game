@@ -29,7 +29,8 @@ export class Player {
     this.breathT = 0;
     this.aimT = 0;       // 0..1
     this.shakeT = 0;
-    this.recoilKick = 0; // pitch up from firing
+    this.recoilKick = 0;    // pitch up from firing
+    this.recoilYawKick = 0; // yaw jitter from firing
 
     // Camera shake impulses
     this._shake = new THREE.Vector3();
@@ -189,13 +190,14 @@ export class Player {
     );
 
     this.recoilKick = damp(this.recoilKick, 0, 8, dt);
+    this.recoilYawKick = damp(this.recoilYawKick, 0, 10, dt);
 
     this.camera.position.set(this.position.x, this.position.y + bobY * 0.6 + breath, this.position.z);
     this.camera.position.x += bobX * 0.6;
     this.camera.position.add(this._shake);
 
     const totalPitch = this.pitch + bobY * 0.1 + this.recoilKick;
-    const totalYaw = this.yaw + bobX * 0.05;
+    const totalYaw = this.yaw + bobX * 0.05 + this.recoilYawKick;
 
     // Build rotation from yaw/pitch
     const q = new THREE.Quaternion();
