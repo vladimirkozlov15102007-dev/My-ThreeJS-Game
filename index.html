@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no" />
+<title>Old Amber Factory</title>
+<link rel="stylesheet" href="./style.css" />
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+
+<!-- Loading screen -->
+<div id="loading" class="overlay">
+  <div class="panel">
+    <h1 class="flicker">OLD AMBER FACTORY</h1>
+    <p class="subtitle">Night of September 17th, 1987</p>
+    <div class="bar"><div id="loading-bar"></div></div>
+    <p id="loading-text">Initializing...</p>
+  </div>
+</div>
+
+<!-- Start / pointer-lock prompt -->
+<div id="start" class="overlay hidden">
+  <div class="panel">
+    <h1 class="flicker">OLD AMBER FACTORY</h1>
+    <p class="tagline">You wake up. Something is hunting you.</p>
+    <div class="controls-grid">
+      <div><b>WASD</b><span>Move</span></div>
+      <div><b>Shift</b><span>Sprint</span></div>
+      <div><b>Ctrl</b><span>Crouch</span></div>
+      <div><b>Space</b><span>Jump</span></div>
+      <div><b>E</b><span>Interact / Pick up</span></div>
+      <div><b>LMB</b><span>Fire / Swing / Throw</span></div>
+      <div><b>RMB</b><span>Aim</span></div>
+      <div><b>R</b><span>Reload</span></div>
+      <div><b>3</b><span>Switch weapon</span></div>
+      <div><b>Q</b><span>Throw held object</span></div>
+    </div>
+    <p class="goal">Kill all 10 skeletons. Find the key. Start the yellow truck. Escape.</p>
+    <button id="btn-start">CLICK TO BEGIN</button>
+  </div>
+</div>
+
+<!-- Pause -->
+<div id="pause" class="overlay hidden">
+  <div class="panel">
+    <h2>PAUSED</h2>
+    <p class="muted">Click to resume.</p>
+  </div>
+</div>
+
+<!-- Win -->
+<div id="win" class="overlay hidden">
+  <div class="panel">
+    <h1>YOU ESCAPED</h1>
+    <p class="tagline">The factory disappears in the fog behind you.</p>
+    <button onclick="location.reload()">PLAY AGAIN</button>
+  </div>
+</div>
+
+<!-- Lose -->
+<div id="lose" class="overlay hidden">
+  <div class="panel">
+    <h1 class="blood">YOU DIED</h1>
+    <p class="muted">The Amber Factory keeps its secrets.</p>
+    <button onclick="location.reload()">TRY AGAIN</button>
+  </div>
+</div>
+
+<!-- HUD -->
+<div id="hud" class="hidden">
+
+  <div id="crosshair">
+    <div class="ch-dot"></div>
+    <div class="ch-t"></div><div class="ch-b"></div>
+    <div class="ch-l"></div><div class="ch-r"></div>
+  </div>
+
+  <div id="damage-vignette"></div>
+  <div id="damage-dirs">
+    <div class="dir" data-dir="N"></div>
+    <div class="dir" data-dir="S"></div>
+    <div class="dir" data-dir="E"></div>
+    <div class="dir" data-dir="W"></div>
+  </div>
+
+  <div id="hud-bl">
+    <div class="stat">
+      <span class="label">HEALTH</span>
+      <div class="bar small"><div id="hp-bar" class="fill hp"></div></div>
+      <span id="hp-text">100</span>
+    </div>
+    <div class="stat">
+      <span class="label">STAMINA</span>
+      <div class="bar small"><div id="st-bar" class="fill st"></div></div>
+    </div>
+  </div>
+
+  <div id="hud-br">
+    <div id="weapon-name">PISTOL</div>
+    <div id="ammo">
+      <span id="ammo-cur">12</span>
+      <span class="sep">/</span>
+      <span id="ammo-tot">60</span>
+    </div>
+    <div id="hint"></div>
+  </div>
+
+  <div id="hud-tl">
+    <div id="objective">
+      <span class="obj-label">OBJECTIVE</span>
+      <span id="objective-text">Eliminate hostiles. Threats remaining: <b id="enemies-left">10</b></span>
+    </div>
+    <div id="subtitle"></div>
+  </div>
+
+  <div id="hud-tr">
+    <div id="compass"></div>
+  </div>
+
+  <div id="interact-prompt" class="hidden"></div>
+
+</div>
+
+<canvas id="c"></canvas>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
